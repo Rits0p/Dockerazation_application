@@ -4,28 +4,66 @@ from .models import *
 from django.contrib import messages
 from django.shortcuts import redirect 
 from functools import wraps
-from django.core import signing
+import jwt
+from django.conf import settings
+from datetime import datetime, timedelta, timezone
 
 def custom_login_required(view_func):
     @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
-        token = request.COOKIES.get('auth_token')
-        if not token:
+        access_token = request.COOKIES.get('access_token')
+        refresh_token = request.COOKIES.get('refresh_token')
+        new_access_token = None
+        user_id = None
+
+        # 1. Try to validate the Access Token
+        if access_token:
+            try:
+                payload = jwt.decode(access_token, settings.SECRET_KEY, algorithms=['HS256'])
+                if payload.get('type') == 'access':
+                    user_id = payload.get('user_id')
+            except jwt.ExpiredSignatureError:
+                pass # Access token expired, we will try the refresh token next
+            except jwt.InvalidTokenError:
+                pass # Invalid token, ignore and see if refresh token is valid
+
+        # 2. If Access Token failed/expired, try the Refresh Token
+        if not user_id and refresh_token:
+            try:
+                refresh_payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=['HS256'])
+                if refresh_payload.get('type') == 'refresh':
+                    user_id = refresh_payload.get('user_id')
+                    
+                    # Success! Refresh token is valid. Generate a brand new Access Token.
+                    new_payload = {
+                        'user_id': user_id,
+                        'type': 'access',
+                        'exp': datetime.now(timezone.utc) + timedelta(minutes=15),
+                        'iat': datetime.now(timezone.utc)
+                    }
+                    new_access_token = jwt.encode(new_payload, settings.SECRET_KEY, algorithm='HS256')
+            except jwt.ExpiredSignatureError:
+                messages.error(request, 'Your session has fully expired. Please log in again.')
+                return redirect('login')
+            except jwt.InvalidTokenError:
+                messages.error(request, 'Invalid refresh mechanism. Please log in.')
+                return redirect('login')
+
+        # 3. If everything failed (no valid tokens), redirect to login
+        if not user_id:
             messages.error(request, 'Please log in to access this page.')
             return redirect('login')
             
-        try:
-            # Decode and verify the token (expires in 1 day = 86400 seconds)
-            data = signing.loads(token, max_age=86400)
-            request.custom_user_id = data.get('user_id')
-        except signing.SignatureExpired:
-            messages.error(request, 'Your token expired. Please log in again.')
-            return redirect('login')
-        except signing.BadSignature:
-            messages.error(request, 'Invalid token. Please log in.')
-            return redirect('login')
+        request.custom_user_id = user_id
+        
+        # 4. Finally, execute the View to get the HTTP Response
+        response = view_func(request, *args, **kwargs)
+        
+        # 5. If we generated a new access token, we must inject it into the final response headers!
+        if new_access_token:
+            response.set_cookie('access_token', new_access_token, httponly=True, max_age=15*60)
             
-        return view_func(request, *args, **kwargs)
+        return response
     return _wrapped_view
 
 def home(request):
@@ -105,13 +143,30 @@ def login(request):
 
         user_obj = user.objects.filter(username=username, password=password).first()
         if user_obj:
-            # Create a stateless token containing the user's ID
-            token = signing.dumps({'user_id': user_obj.id})
+            # Create a short-lived ACCESS TOKEN (e.g., 15 minutes)
+            access_payload = {
+                'user_id': user_obj.id,
+                'type': 'access',
+                'exp': datetime.now(timezone.utc) + timedelta(minutes=15),
+                'iat': datetime.now(timezone.utc)
+            }
+            access_token = jwt.encode(access_payload, settings.SECRET_KEY, algorithm='HS256')
+
+            # Create a long-lived REFRESH TOKEN (e.g., 7 days)
+            refresh_payload = {
+                'user_id': user_obj.id,
+                'type': 'refresh',
+                'exp': datetime.now(timezone.utc) + timedelta(days=7),
+                'iat': datetime.now(timezone.utc)
+            }
+            refresh_token = jwt.encode(refresh_payload, settings.SECRET_KEY, algorithm='HS256')
             
             messages.success(request, 'Login successful.')
             response = redirect('home')
-            # Set the token as a cookie in the browser
-            response.set_cookie('auth_token', token, httponly=True)
+            
+            # Plant both tokens safely into the browser with proper cookie lifespans
+            response.set_cookie('access_token', access_token, httponly=True, max_age=15*60) # 15 minutes
+            response.set_cookie('refresh_token', refresh_token, httponly=True, max_age=7*24*60*60) # 7 days
             return response
         else:
             messages.error(request, 'Invalid username or password.')    
@@ -120,7 +175,8 @@ def login(request):
 def logout(request):
     messages.success(request, 'Logged out successfully.')
     response = redirect('login')
-    # Destroy the token to log out
-    response.delete_cookie('auth_token')
+    # Destroy BOTH tokens to ensure logging out wipes all credentials
+    response.delete_cookie('access_token')
+    response.delete_cookie('refresh_token')
     return response
 
