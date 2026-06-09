@@ -4,13 +4,27 @@ from .models import *
 from django.contrib import messages
 from django.shortcuts import redirect 
 from functools import wraps
+from django.core import signing
 
 def custom_login_required(view_func):
     @wraps(view_func)
     def _wrapped_view(request, *args, **kwargs):
-        if 'user_id' not in request.session:
+        token = request.COOKIES.get('auth_token')
+        if not token:
             messages.error(request, 'Please log in to access this page.')
             return redirect('login')
+            
+        try:
+            # Decode and verify the token (expires in 1 day = 86400 seconds)
+            data = signing.loads(token, max_age=86400)
+            request.custom_user_id = data.get('user_id')
+        except signing.SignatureExpired:
+            messages.error(request, 'Your token expired. Please log in again.')
+            return redirect('login')
+        except signing.BadSignature:
+            messages.error(request, 'Invalid token. Please log in.')
+            return redirect('login')
+            
         return view_func(request, *args, **kwargs)
     return _wrapped_view
 
@@ -91,16 +105,22 @@ def login(request):
 
         user_obj = user.objects.filter(username=username, password=password).first()
         if user_obj:
-            request.session['user_id'] = user_obj.id
+            # Create a stateless token containing the user's ID
+            token = signing.dumps({'user_id': user_obj.id})
+            
             messages.success(request, 'Login successful.')
-            return redirect('home')  # Redirect to home page after successful login
+            response = redirect('home')
+            # Set the token as a cookie in the browser
+            response.set_cookie('auth_token', token, httponly=True)
+            return response
         else:
             messages.error(request, 'Invalid username or password.')    
     return render(request,'login.html')
 
 def logout(request):
-    if 'user_id' in request.session:
-        del request.session['user_id']
     messages.success(request, 'Logged out successfully.')
-    return redirect('login')
+    response = redirect('login')
+    # Destroy the token to log out
+    response.delete_cookie('auth_token')
+    return response
 
