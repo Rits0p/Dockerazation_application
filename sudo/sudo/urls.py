@@ -21,8 +21,12 @@ from sudo.views import *
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('',home,name='home'),
+    path('home/', home, name='home'),
     path('employees/', emplist,name='emplist'),
     path('add_employee/', emp_form,name='emp_form'),
     path('edit_employee/<int:emp_id>/', edit_emp, name='edit_emp'),
     path('delete_employee/<int:emp_id>/', delete_emp, name='delete_emp'),
+    path('register/', register, name='register'),
+    path('login/', login, name='login'),
+    path('logout/', logout, name='logout'),
 ]
