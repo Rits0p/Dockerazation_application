@@ -7,6 +7,7 @@ from functools import wraps
 import jwt
 from django.conf import settings
 from datetime import datetime, timedelta, timezone
+from .serializer import *
 
 def custom_login_required(view_func):
     @wraps(view_func)
@@ -180,3 +181,230 @@ def logout(request):
     response.delete_cookie('refresh_token')
     return response
 
+
+
+# ─────────────────────────────────────────────
+#  REST API Views (DRF APIView)
+# ─────────────────────────────────────────────
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+
+
+def jwt_required(func):
+    """
+    Decorator for APIView methods that validates the
+    'Authorization: Bearer <access_token>' header using JWT.
+    On success it attaches `request.api_user_id` to the request object.
+    """
+    @wraps(func)
+    def wrapper(self, request, *args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+        if not auth_header.startswith('Bearer '):
+            return Response(
+                {'error': 'Authorization header missing or malformed. Use: Bearer <token>'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        token = auth_header.split(' ', 1)[1]
+        try:
+            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+            if payload.get('type') != 'access':
+                raise jwt.InvalidTokenError('Not an access token')
+            request.api_user_id = payload.get('user_id')
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Access token expired.'}, status=status.HTTP_401_UNAUTHORIZED)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid access token.'}, status=status.HTTP_401_UNAUTHORIZED)
+        return func(self, request, *args, **kwargs)
+    return wrapper
+
+
+# ── Auth APIs ─────────────────────────────────
+
+class RegisterAPIView(APIView):
+    """
+    POST /api/register/
+    Body: { "username": "...", "email": "...", "password": "..." }
+    """
+    def post(self, request):
+        serializer = UserSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data.get('email')
+            if user.objects.filter(email=email).exists():
+                return Response(
+                    {'error': 'A user with this email already exists.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            serializer.save()
+            return Response(
+                {'message': 'Registration successful.', 'user': serializer.data},
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LoginAPIView(APIView):
+    """
+    POST /api/login/
+    Body: { "username": "...", "password": "..." }
+    Returns: { "access_token": "...", "refresh_token": "..." }
+    """
+    def post(self, request):
+        username = request.data.get('username')
+        password = request.data.get('password')
+
+        if not username or not password:
+            return Response(
+                {'error': 'Both username and password are required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        user_obj = user.objects.filter(username=username, password=password).first()
+        if not user_obj:
+            return Response(
+                {'error': 'Invalid username or password.'},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
+        # Issue a short-lived access token (15 minutes)
+        access_payload = {
+            'user_id': user_obj.id,
+            'type': 'access',
+            'exp': datetime.now(timezone.utc) + timedelta(minutes=15),
+            'iat': datetime.now(timezone.utc),
+        }
+        access_token = jwt.encode(access_payload, settings.SECRET_KEY, algorithm='HS256')
+
+        # Issue a long-lived refresh token (7 days)
+        refresh_payload = {
+            'user_id': user_obj.id,
+            'type': 'refresh',
+            'exp': datetime.now(timezone.utc) + timedelta(days=7),
+            'iat': datetime.now(timezone.utc),
+        }
+        refresh_token = jwt.encode(refresh_payload, settings.SECRET_KEY, algorithm='HS256')
+
+        return Response({
+            'message': 'Login successful.',
+            'access_token': access_token,
+            'refresh_token': refresh_token,
+        }, status=status.HTTP_200_OK)
+
+
+class RefreshAPIView(APIView):
+    """
+    POST /api/refresh/
+    Body: { "refresh_token": "..." }
+    Returns: { "access_token": "..." }
+    """
+    def post(self, request):
+        refresh_token = request.data.get('refresh_token')
+
+        if not refresh_token:
+            return Response(
+                {'error': 'refresh_token is required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=['HS256'])
+            if payload.get('type') != 'refresh':
+                raise jwt.InvalidTokenError('Not a refresh token')
+            
+            user_id = payload.get('user_id')
+            
+            # Issue a new short-lived access token (15 minutes)
+            access_payload = {
+                'user_id': user_id,
+                'type': 'access',
+                'exp': datetime.now(timezone.utc) + timedelta(minutes=15),
+                'iat': datetime.now(timezone.utc),
+            }
+            new_access_token = jwt.encode(access_payload, settings.SECRET_KEY, algorithm='HS256')
+            
+            return Response({
+                'message': 'Token refreshed successfully.',
+                'access_token': new_access_token
+            }, status=status.HTTP_200_OK)
+            
+        except jwt.ExpiredSignatureError:
+            return Response({'error': 'Refresh token expired. Please log in again.'}, status=status.HTTP_401_UNAUTHORIZED)
+        except jwt.InvalidTokenError:
+            return Response({'error': 'Invalid refresh token.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+# ── Employee APIs ──────────────────────────────
+
+class EmployeeListCreateAPIView(APIView):
+    """
+    GET  /api/employees/   — List all employees  (JWT required)
+    POST /api/employees/   — Create an employee  (JWT required)
+    """
+
+    @jwt_required
+    def get(self, request):
+        employees = Employee.objects.all()
+        serializer = EmployeeSerializer(employees, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+    @jwt_required
+    def post(self, request):
+        serializer = EmployeeSerializer(data=request.data)
+        if serializer.is_valid():
+            email = serializer.validated_data.get('email')
+            if Employee.objects.filter(email=email).exists():
+                return Response(
+                    {'error': 'An employee with this email already exists.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            serializer.save()
+            return Response(
+                {'message': 'Employee created successfully.', 'employee': serializer.data},
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class EmployeeDetailAPIView(APIView):
+    """
+    GET    /api/employees/<int:emp_id>/  — Retrieve one employee  (JWT required)
+    PUT    /api/employees/<int:emp_id>/  — Update an employee     (JWT required)
+    DELETE /api/employees/<int:emp_id>/  — Delete an employee     (JWT required)
+    """
+
+    def _get_employee(self, emp_id):
+        try:
+            return Employee.objects.get(id=emp_id)
+        except Employee.DoesNotExist:
+            return None
+
+    @jwt_required
+    def get(self, request, emp_id):
+        employee = self._get_employee(emp_id)
+        if not employee:
+            return Response({'error': 'Employee not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = EmployeeSerializer(employee)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @jwt_required
+    def put(self, request, emp_id):
+        employee = self._get_employee(emp_id)
+        if not employee:
+            return Response({'error': 'Employee not found.'}, status=status.HTTP_404_NOT_FOUND)
+        serializer = EmployeeSerializer(employee, data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {'message': 'Employee updated successfully.', 'employee': serializer.data},
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    @jwt_required
+    def delete(self, request, emp_id):
+        employee = self._get_employee(emp_id)
+        if not employee:
+            return Response({'error': 'Employee not found.'}, status=status.HTTP_404_NOT_FOUND)
+        employee.delete()
+        return Response({'message': 'Employee deleted successfully.'}, status=status.HTTP_204_NO_CONTENT)

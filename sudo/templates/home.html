@@ -1,31 +1,56 @@
 {% load static %}
-
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Employee Management</title>
+    <title>EmpManage - Employee Management System</title>
+    <link rel="stylesheet" href="{% static 'css/one.css' %}">
 </head>
+
 <body>
 
     {% include 'navbar.html' %}
 
+    {% if messages %}
+    <div class="messages">
+        {% for message in messages %}
+        <div class="message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
     <div class="home-container">
-        <h1>Employee Management System</h1>
-
-        <a href="{% url 'login' %}">
-            <button class="home-btn">Login</button>
-        </a>
-
-        <p>
-            Manage employee records and information easily.
+        <h1>Employee Management<br>System</h1>
+        <p class="subtitle">
+            Streamline your workforce management. Add, edit, and track employee records with a secure, modern platform.
         </p>
 
-        <a href="{% url 'emplist' %}" class="home-btn">
-            View Employees
-        </a>
+        <div class="home-actions">
+            <a href="{% url 'login' %}" class="home-btn primary">🔑 Login</a>
+            <a href="{% url 'emplist' %}" class="home-btn secondary">👥 View Employees</a>
+        </div>
+
+        <div class="features">
+            <div class="feature-card">
+                <div class="icon">🔒</div>
+                <h3>JWT Authentication</h3>
+                <p>Industry-standard token-based security with automatic access token refresh.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">📋</div>
+                <h3>CRUD Operations</h3>
+                <p>Create, read, update, and delete employee records seamlessly.</p>
+            </div>
+            <div class="feature-card">
+                <div class="icon">🐳</div>
+                <h3>Dockerized</h3>
+                <p>Fully containerized application ready for deployment anywhere.</p>
+            </div>
+        </div>
     </div>
 
 </body>
+
 </html>

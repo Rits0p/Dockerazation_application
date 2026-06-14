@@ -1,9 +1,11 @@
+{% load static %}
 <nav class="navbar">
-    <div class="logo">EmpManage</div>
+    <a href="{% url 'home' %}" class="logo">EmpManage</a>
 
     <ul class="nav-links">
-        <li><a href="/">Home</a></li>
-        <li><a href="{% url 'emplist' %}">Employees</a></li>
-        <li><a href="{% url 'emp_form' %}">Add Employee</a></li>
+        <li><a href="{% url 'home' %}">🏠 Home</a></li>
+        <li><a href="{% url 'emplist' %}">👥 Employees</a></li>
+        <li><a href="{% url 'emp_form' %}">➕ Add Employee</a></li>
+        <li><a href="{% url 'logout' %}" class="nav-logout">🔓 Logout</a></li>
     </ul>
 </nav>

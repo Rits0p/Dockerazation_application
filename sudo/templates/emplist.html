@@ -5,103 +5,69 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Employee List</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: Arial, sans-serif;
-        }
-
-        body {
-            background: #f4f6f9;
-            padding: 40px;
-        }
-
-        .container {
-            max-width: 1000px;
-            margin: auto;
-            background: white;
-            padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
-        }
-
-        h1 {
-            text-align: center;
-            margin-bottom: 25px;
-            color: #1e293b;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-
-        table th {
-            background: #2563eb;
-            color: white;
-            padding: 14px;
-            text-align: left;
-        }
-
-        table td {
-            padding: 12px;
-            border-bottom: 1px solid #ddd;
-        }
-
-        tr:hover {
-            background: #f1f5f9;
-        }
-
-        .add-btn {
-            display: inline-block;
-            margin-bottom: 20px;
-            padding: 10px 20px;
-            background: #16a34a;
-            color: white;
-            text-decoration: none;
-            border-radius: 8px;
-        }
-
-        .add-btn:hover {
-            background: #15803d;
-        }
-    </style>
+    <title>Employee List - EmpManage</title>
+    <link rel="stylesheet" href="{% static 'css/one.css' %}">
 </head>
 
 <body>
-    <div class="container">
-        <h1>Employee List</h1>
-         <a href="{% url 'emp_form' %}" class="add-btn"> Add Employee </a>
-        <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th>Department</th>
-                </tr>
-            </thead>
-            <tbody> 
-                {% for employee in employee %} 
-                <tr>
-                    <td>{{ forloop.counter }}</td>
-                    <td>{{ employee.name }}</td>
-                    <td>{{ employee.email }}</td>
-                    <td>{{ employee.phone }}</td>
-                    <td>{{ employee.department }}</td>
-                </tr>
-                <td>
-                <a href="{% url 'edit_emp' employee.id %}">Edit</a>
-                <a href="{% url 'delete_emp' employee.id %}">Delete</a>
-                </td>
-                 {% endfor %} 
-                </tbody>
-        </table>
+
+    {% include 'navbar.html' %}
+
+    {% if messages %}
+    <div class="messages">
+        {% for message in messages %}
+        <div class="message {{ message.tags }}">{{ message }}</div>
+        {% endfor %}
     </div>
+    {% endif %}
+
+    <div class="page-wrapper">
+        <div class="table-header">
+            <h1>👥 Employee List</h1>
+            <a href="{% url 'emp_form' %}" class="add-btn">➕ Add Employee</a>
+        </div>
+
+        <div class="table-card">
+            {% if employee %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Name</th>
+                        <th>Email</th>
+                        <th>Phone</th>
+                        <th>Department</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for emp in employee %}
+                    <tr>
+                        <td>{{ forloop.counter }}</td>
+                        <td>{{ emp.name }}</td>
+                        <td>{{ emp.email }}</td>
+                        <td>{{ emp.phone }}</td>
+                        <td>{{ emp.department }}</td>
+                        <td>
+                            <div class="action-links">
+                                <a href="{% url 'edit_emp' emp.id %}" class="edit-link">✏️ Edit</a>
+                                <a href="{% url 'delete_emp' emp.id %}" class="delete-link">🗑️ Delete</a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <p>No employees found. Add your first employee!</p>
+                <a href="{% url 'emp_form' %}" class="add-btn">➕ Add Employee</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
 </body>
 
 </html>
