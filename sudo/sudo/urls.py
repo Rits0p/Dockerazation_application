@@ -15,8 +15,12 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
 from sudo.views import *
+from rest_framework.routers import DefaultRouter
+
+router = DefaultRouter()
+router.register(r'api/employees', EmployeeViewSet, basename='employee')
 
 urlpatterns = [
     # ── Admin ─────────────────────────────────
@@ -33,10 +37,9 @@ urlpatterns = [
     path('login/', login, name='login'),
     path('logout/', logout, name='logout'),
 
-    # ── REST API endpoints (DRF APIView) ────────
-    path('api/register/', RegisterAPIView.as_view(), name='api_register'),
-    path('api/login/', LoginAPIView.as_view(), name='api_login'),
-    path('api/refresh/', RefreshAPIView.as_view(), name='api_refresh'),
-    path('api/employees/', EmployeeListCreateAPIView.as_view(), name='api_employee_list'),
-    path('api/employees/<int:emp_id>/', EmployeeDetailAPIView.as_view(), name='api_employee_detail'),
+    # ── REST API endpoints (DRF ViewSets) ────────
+    path('api/register/', AuthViewSet.as_view({'post': 'register'}), name='api_register'),
+    path('api/login/', AuthViewSet.as_view({'post': 'login'}), name='api_login'),
+    path('api/refresh/', AuthViewSet.as_view({'post': 'refresh'}), name='api_refresh'),
+    path('', include(router.urls)),
 ]

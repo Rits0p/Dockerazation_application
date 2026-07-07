@@ -189,6 +189,8 @@ def logout(request):
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from rest_framework import viewsets
+from django.core.cache import cache
 
 
 def jwt_required(func):
@@ -221,12 +223,15 @@ def jwt_required(func):
 
 # ── Auth APIs ─────────────────────────────────
 
-class RegisterAPIView(APIView):
+from rest_framework.decorators import action
+
+class AuthViewSet(viewsets.ViewSet):
     """
-    POST /api/register/
-    Body: { "username": "...", "email": "...", "password": "..." }
+    Auth endpoints for register, login, and refresh.
     """
-    def post(self, request):
+
+    @action(detail=False, methods=['post'])
+    def register(self, request):
         serializer = UserSerializer(data=request.data)
         if serializer.is_valid():
             email = serializer.validated_data.get('email')
@@ -242,14 +247,8 @@ class RegisterAPIView(APIView):
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
-class LoginAPIView(APIView):
-    """
-    POST /api/login/
-    Body: { "username": "...", "password": "..." }
-    Returns: { "access_token": "...", "refresh_token": "..." }
-    """
-    def post(self, request):
+    @action(detail=False, methods=['post'])
+    def login(self, request):
         username = request.data.get('username')
         password = request.data.get('password')
 
@@ -290,14 +289,8 @@ class LoginAPIView(APIView):
             'refresh_token': refresh_token,
         }, status=status.HTTP_200_OK)
 
-
-class RefreshAPIView(APIView):
-    """
-    POST /api/refresh/
-    Body: { "refresh_token": "..." }
-    Returns: { "access_token": "..." }
-    """
-    def post(self, request):
+    @action(detail=False, methods=['post'])
+    def refresh(self, request):
         refresh_token = request.data.get('refresh_token')
 
         if not refresh_token:
@@ -335,21 +328,39 @@ class RefreshAPIView(APIView):
 
 # ── Employee APIs ──────────────────────────────
 
-class EmployeeListCreateAPIView(APIView):
+
+
+class EmployeeViewSet(viewsets.ViewSet):
     """
-    GET  /api/employees/   — List all employees  (JWT required)
-    POST /api/employees/   — Create an employee  (JWT required)
+    A simple ViewSet for listing, retrieving, creating, updating and deleting employees.
+    (JWT required for all endpoints)
     """
 
+    def _get_employee(self, emp_id):
+        try:
+            return Employee.objects.get(id=emp_id)
+        except Employee.DoesNotExist:
+            return None
+
     @jwt_required
-    def get(self, request):
+    def list(self, request):
+        # 1. Try to get data from Redis cache
+        cached_employees = cache.get('all_employees_data')
+
+        if cached_employees:
+            return Response(cached_employees, status=status.HTTP_200_OK)
+            
+        # 2. If not in cache, fetch from database
         employees = Employee.objects.all()
         serializer = EmployeeSerializer(employees, many=True)
+        
+        # 3. Save the result to cache for 5 minutes (300 seconds)
+        cache.set('all_employees_data', serializer.data, timeout=300)
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-
     @jwt_required
-    def post(self, request):
+    def create(self, request):
         serializer = EmployeeSerializer(data=request.data)
         if serializer.is_valid():
             email = serializer.validated_data.get('email')
@@ -365,31 +376,17 @@ class EmployeeListCreateAPIView(APIView):
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-
-class EmployeeDetailAPIView(APIView):
-    """
-    GET    /api/employees/<int:emp_id>/  — Retrieve one employee  (JWT required)
-    PUT    /api/employees/<int:emp_id>/  — Update an employee     (JWT required)
-    DELETE /api/employees/<int:emp_id>/  — Delete an employee     (JWT required)
-    """
-
-    def _get_employee(self, emp_id):
-        try:
-            return Employee.objects.get(id=emp_id)
-        except Employee.DoesNotExist:
-            return None
-
     @jwt_required
-    def get(self, request, emp_id):
-        employee = self._get_employee(emp_id)
+    def retrieve(self, request, pk=None):
+        employee = self._get_employee(pk)
         if not employee:
             return Response({'error': 'Employee not found.'}, status=status.HTTP_404_NOT_FOUND)
         serializer = EmployeeSerializer(employee)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @jwt_required
-    def put(self, request, emp_id):
-        employee = self._get_employee(emp_id)
+    def update(self, request, pk=None):
+        employee = self._get_employee(pk)
         if not employee:
             return Response({'error': 'Employee not found.'}, status=status.HTTP_404_NOT_FOUND)
         serializer = EmployeeSerializer(employee, data=request.data)
@@ -402,8 +399,8 @@ class EmployeeDetailAPIView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
     @jwt_required
-    def delete(self, request, emp_id):
-        employee = self._get_employee(emp_id)
+    def destroy(self, request, pk=None):
+        employee = self._get_employee(pk)
         if not employee:
             return Response({'error': 'Employee not found.'}, status=status.HTTP_404_NOT_FOUND)
         employee.delete()
